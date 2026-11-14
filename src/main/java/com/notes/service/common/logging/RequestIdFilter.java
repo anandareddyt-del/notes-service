@@ -1,4 +1,4 @@
-package com.notes.service.web;
+package com.notes.service.common.logging;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
