@@ -271,6 +271,25 @@ message or stack trace. `detail` is always a hand-written, safe string.
   (subject and actor, once real auth exists) - matters specifically because
   notes are shared and edited by more than one person; right now there's no
   answer to "who changed this note" beyond the `updatedAt` timestamp.
+- **Data protection - field-level encryption, specifically, not just
+  at-rest.** No note content is currently classified as sensitive (see
+  Assumptions), so this is out of scope today - but worth being precise about
+  what it would actually take if that changed, since the two are often
+  conflated: a managed Postgres's at-rest encryption (RDS/Cloud SQL) protects
+  against disk theft and unauthorized snapshot access, but does *not* hide
+  data from the cloud provider itself - the database engine, which the
+  provider operates, transparently decrypts every row to serve every query.
+  The actual lever for "the provider can't read this" is field-level
+  encryption in application code, with keys the application controls, so the
+  database only ever stores and serves ciphertext for specific sensitive
+  fields. **Confidential computing is deliberately not the answer here** - it
+  solves a threat model (protecting against the infrastructure provider
+  itself) this product doesn't have; it's reserved for multi-party
+  computation, classified government workloads, or specific regulatory
+  mandates that explicitly require it, none of which apply to small-team
+  note-sharing. Naming it and rejecting it is more useful than silence, since
+  conflating "encrypted at rest" with "hidden from the provider" is a common,
+  costly mistake.
 - **Abuse protection / rate limiting.** Per-client rate limits and cost-based
   limits on expensive operations (e.g. large list queries) - this would live
   at the API-gateway layer once one exists (see below), not bolted onto this
