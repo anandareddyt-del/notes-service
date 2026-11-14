@@ -402,6 +402,18 @@ already built, rather than a feature bolted on for its own sake.
 8. **Notifications** ("someone shared a note with you," "a note you're
    watching changed") - a natural fit for the async/webhook pattern discussed
    in the reference architecture, not a redesign of this service.
+9. **Real-time collaborative editing.** The direct answer to pillar 2's
+   accepted cost ("conflicts require manual re-edit, not live co-editing") -
+   would replace or augment optimistic locking with a CRDT or Operational
+   Transformation algorithm over a WebSocket connection, so concurrent edits
+   merge automatically instead of one being rejected and redone by hand.
+   Deliberately "later," not "near-term": it's justified by a *different*
+   usage pattern than this system's stated scale assumption (several small
+   teams doing async note-taking, not simultaneous live-meeting editing) -
+   building it now would be solving a problem this product doesn't have yet,
+   exactly the premature-flexibility trap the "Stop" item above warns against.
+   Worth revisiting if the actual usage pattern turns out to include
+   synchronous co-editing.
 
 **Deliberately left off**, to be explicit about what was pruned rather than
 just not thought of: markdown rendering, note export (PDF/Markdown). Both are
