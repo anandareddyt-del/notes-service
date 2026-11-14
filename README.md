@@ -383,14 +383,29 @@ region active-active (no stated requirement for it), and CQRS/read-model
 separation (the read replica lever above is the right next step long before
 this one is).
 
+## Assumptions
+
+The brief leaves scope open by design. Where it doesn't specify something,
+here's what was assumed and why:
+
+| Assumption | Why |
+|---|---|
+| Notes can have concurrent writers | "Shared amongst teams" implies more than one person can hold write access at once |
+| Sharing happens at both user and team granularity | The brief says "shared amongst teams" but doesn't rule out sharing with one teammate directly |
+| A note's owner is a single person, never a team | Avoids a second, nested RBAC problem over who inside a team could act as owner |
+| Scale is "several small teams," not internet-scale | Taken directly from the brief's own wording; justifies not building CQRS, partitioning, or an API gateway |
+| Permission levels are read/write only | Simplest model that satisfies "capture and work with their notes" |
+| The repo must be reviewer-accessible with no extra permissions | "Submit a link... that reviewers can access" - repo is public |
+
 ## Functional roadmap
 
-The section above is about hardening what already exists (auth, resilience,
-observability). This one is different: new user-facing capability, prioritized
-by how directly each item closes a gap in what the service already promises -
-not a brainstorm dump. Each one either fills a hole the current design
-explicitly creates, or is a natural, low-cost extension of a mechanism that's
-already built, rather than a feature bolted on for its own sake.
+The section above (and "What I'd change, add, or stop doing" higher up) is
+about hardening what already exists (auth, resilience, observability). This
+one is different: new user-facing capability, prioritized by how directly
+each item closes a gap in what the service already promises - not a
+brainstorm dump. Each one either fills a hole the current design explicitly
+creates, or is a natural, low-cost extension of a mechanism that's already
+built, rather than a feature bolted on for its own sake.
 
 **Near-term - these close real gaps, not nice-to-haves:**
 
@@ -451,20 +466,6 @@ already built, rather than a feature bolted on for its own sake.
 **Deliberately left off**, to be explicit about what was pruned rather than
 just not thought of: markdown rendering, note export (PDF/Markdown). Both are
 cosmetic - they don't unlock a new capability the way the items above do.
-
-## Assumptions
-
-The brief leaves scope open by design. Where it doesn't specify something,
-here's what was assumed and why:
-
-| Assumption | Why |
-|---|---|
-| Notes can have concurrent writers | "Shared amongst teams" implies more than one person can hold write access at once |
-| Sharing happens at both user and team granularity | The brief says "shared amongst teams" but doesn't rule out sharing with one teammate directly |
-| A note's owner is a single person, never a team | Avoids a second, nested RBAC problem over who inside a team could act as owner |
-| Scale is "several small teams," not internet-scale | Taken directly from the brief's own wording; justifies not building CQRS, partitioning, or an API gateway |
-| Permission levels are read/write only | Simplest model that satisfies "capture and work with their notes" |
-| The repo must be reviewer-accessible with no extra permissions | "Submit a link... that reviewers can access" - repo is public |
 
 ## Commit history
 
