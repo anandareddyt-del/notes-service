@@ -234,11 +234,11 @@ message or stack trace. `detail` is always a hand-written, safe string.
   rather than left as an assumed default). What I'd add: a real log aggregator
   so the `X-Request-Id` trace correlation is actually queryable, not just
   grep-able in local logs.
-- **DB resilience**: bounded connection pool + query timeouts, and retry with
-  exponential backoff specifically for transient infrastructure failures (DB
-  unreachable) - explicitly never for optimistic-lock conflicts, which must
-  never be retried automatically. Not yet implemented; named here rather than
-  silently skipped.
+- **DB resilience.** Bounded connection pool + timeouts are now configured
+  (`spring.datasource.hikari.*`, see "Deployment" below) - what's still
+  missing is retry with exponential backoff specifically for *transient
+  infrastructure failures* (DB unreachable), explicitly never for
+  optimistic-lock conflicts, which must never be retried automatically.
 - **Audit & non-repudiation.** An append-only log of who changed what, as whom
   (subject and actor, once real auth exists) - matters specifically because
   notes are shared and edited by more than one person; right now there's no
@@ -269,6 +269,86 @@ message or stack trace. `detail` is always a hand-written, safe string.
 - **Stop**: resist adding a role hierarchy or general RBAC until there's an
   actual requirement for it - the two-level owner/collaborator model is doing
   its job at this scale, and more flexibility now would be speculative.
+
+## Deployment
+
+This hasn't been deployed anywhere - it's reviewed by cloning and running
+locally. But the design isn't accidentally local-only: every piece needed for
+a real scalability/resilience story is either already true of the code, or a
+named, concrete gap, not a vague gesture at "cloud-native."
+
+**The app tier is stateless, which is what makes any of this possible.**
+Identity rides on a header/token per request (no server-side session), so any
+instance can handle any request - that's what lets you run N identical
+replicas behind a load balancer with no sticky-session requirement, and what
+makes a rolling deploy safe (an in-flight user's next request just lands on a
+different, equally-valid instance).
+
+**Target topology:**
+
+```
+                      ┌─────────────┐
+   clients ────────▶  │ Load balancer│
+                      └──────┬──────┘
+                 ┌───────────┼───────────┐
+                 ▼           ▼           ▼
+            ┌────────┐  ┌────────┐  ┌────────┐
+            │instance│  │instance│  │instance│   stateless, identical,
+            │   1    │  │   2    │  │   3    │   spread across ≥2 AZs
+            └───┬────┘  └───┬────┘  └───┬────┘
+                 └───────────┼───────────┘
+                              ▼
+                     ┌─────────────────┐
+                     │ Postgres primary │ ── async replica (2nd AZ, failover)
+                     └─────────────────┘
+```
+
+- **Container + orchestrator** (Kubernetes, ECS, or similar) running multiple
+  replicas of the same image - built from `docker-compose.yml`'s Postgres
+  service for local dev, a real managed Postgres (RDS/Cloud SQL) in any real
+  environment.
+- **Load balancer in front, health-probe-aware.** `/actuator/health/readiness`
+  and `/actuator/health/liveness` are both live endpoints now (Spring Boot
+  Actuator) - readiness governs whether traffic is routed to an instance at
+  all; liveness governs whether the orchestrator restarts it. These are two
+  different questions ("is this instance safe to send work to" vs. "is this
+  instance alive"), and conflating them is a common, avoidable cause of an
+  orchestrator routing traffic to - or needlessly restarting - an instance
+  that's in the wrong state for the wrong reason.
+- **Graceful shutdown** (`server.shutdown=graceful`, now configured) - an
+  in-flight request finishes instead of being dropped mid-response when an
+  instance is terminated during a deploy or scale-down.
+- **Database: vertical-scale-first, with one well-known lever before
+  anything structural.** Pillar 3's tradeoff was no horizontal sharding - the
+  first real scaling step, well before CQRS or partitioning, is a bigger
+  primary plus read replicas for the read-heavy `GET /notes` list query. A
+  read replica is a config change, not an architecture change; partitioning
+  (named in "what I'd add") is the step after that, only once a single
+  primary genuinely can't keep up.
+- **Connection pool sizing is a multi-instance problem, not a single-instance
+  one.** Each replica has its own bounded Hikari pool (`DB_POOL_SIZE`,
+  default 10, now configurable per environment). The real constraint:
+  `pool size × instance count` must stay under Postgres's own
+  `max_connections` - easy to get right with one instance, easy to silently
+  break the moment you scale out, which is exactly the kind of gotcha worth
+  naming here rather than discovering during an incident.
+- **Config is parameterized per environment**, not hardcoded: DB URL/
+  credentials, pool size, timeouts, log level, and port all read from
+  environment variables with local-dev fallbacks (`${VAR:default}` in
+  `application*.properties`) - what changes between dev/staging/prod is an
+  orchestrator-injected ConfigMap/Secret, never a code change or a rebuilt
+  image.
+- **Autoscaling: deliberately not recommending it yet.** At "several small
+  teams" scale, a fixed small replica count (2-3, for availability across
+  AZs, not for load) is the honest answer - recommending a CPU/request-rate
+  autoscaler here would be solving a load problem this system doesn't have.
+  Worth revisiting once there's real traffic data to size a policy against.
+
+**Deliberately out of scope for this deployment story**, consistent with the
+rest of this README: a service mesh (nothing to mesh with one service), multi-
+region active-active (no stated requirement for it), and CQRS/read-model
+separation (the read replica lever above is the right next step long before
+this one is).
 
 ## Functional roadmap
 
