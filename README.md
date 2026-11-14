@@ -180,6 +180,16 @@ here plainly. Swapping to Postgres is `spring.profiles.active=postgres` plus
 - **API gateway** - deliberately not added now (single service, nothing to
   route between); the right call today, the wrong one the moment a second
   service (e.g. search, notifications) exists.
+- **OpenAPI contract** (e.g. springdoc-openapi) - standard for a production API,
+  especially one meant for multiple independent consumer teams: a single
+  machine-readable source of truth for the contract, enabling generated client
+  SDKs and compatibility checks in CI to catch breaking changes before they
+  ship, rather than a consuming team discovering them in production. Not added
+  here - this API has 4 endpoints already covered by the curl examples above,
+  and the project sits on a very recently released Spring Boot/Spring version
+  pairing where an added dependency's compatibility hadn't been verified; the
+  value of OpenAPI scales with API surface size and consumer count, neither of
+  which this submission has yet.
 - **Stop**: resist adding a role hierarchy or general RBAC until there's an
   actual requirement for it - the two-level owner/collaborator model is doing
   its job at this scale, and more flexibility now would be speculative.
