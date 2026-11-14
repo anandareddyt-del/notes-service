@@ -19,10 +19,13 @@ The service starts on `http://localhost:8080`. There's no real auth (see
 "What I'd change" below) - every request identifies its caller via an
 `X-User-Id` header, a deliberate stand-in for a real principal.
 
-```bash
-# create a user directly via the H2 console (http://localhost:8080/h2-console,
-# JDBC URL jdbc:h2:mem:notes), or seed one some other way, then:
+A `DevDataSeeder` creates two demo users on startup (`1` = Alice, `2` = Bob, plus
+an "Engineering" team Bob belongs to) so these work immediately - no H2 console
+is exposed anywhere in this service, in any profile; an interactive DB console
+is exactly the kind of thing a vulnerability scanner flags, so it was left out
+entirely rather than enabled "just for dev."
 
+```bash
 curl -X POST localhost:8080/api/v1/notes \
   -H "X-User-Id: 1" -H "Content-Type: application/json" \
   -d '{"title":"First note","body":"hello"}'
