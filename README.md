@@ -69,6 +69,37 @@ HTTP-layer tests proving the full status-code contract (201/400/404/403/409/
 422) holds at the REST boundary, including the idempotency-key replay and
 reuse-conflict behavior below.
 
+## Code organization
+
+```
+src/main/java/com/notes/service/
+├── domain/      JPA entities - User, Team, TeamMembership, Note, NoteAcl, IdempotencyRecord
+├── repository/  Spring Data interfaces - no business logic, just queries
+├── service/     Business logic: NoteAccessService (authorization), NoteService
+│                (note lifecycle). The only layer that talks to both repository
+│                and domain; web/ never touches a repository directly.
+├── web/         NoteController + DTOs (web/dto) + error handling (web/error) -
+│                HTTP concerns only. Controllers delegate every decision to
+│                service/; there's no authorization or business logic here.
+├── common/      Cross-cutting infra, not business-specific - currently just
+│  └─ logging/   RequestIdFilter (request correlation). Deliberately pulled out
+│                of web/ rather than mixed in with controllers - see commit
+│                history for why.
+└── config/      DevDataSeeder - the "demo driver": a CommandLineRunner that
+                 seeds two demo users (Alice/Bob) and a team on startup, so the
+                 curl examples above work immediately with no setup step.
+                 Idempotent (skips seeding if data already exists) - it isn't
+                 just a nicety, it's what's running every time this app starts,
+                 including every test's Spring context.
+```
+
+Each layer only calls the one below it - `web` → `service` → `repository` →
+`domain`, never sideways or back up. `NoteAccessService` living in `service/`
+rather than inside `NoteController` is what let the authorization logic get
+pure-unit-tested with Mockito (`NoteAccessServiceTest`) with zero HTTP or
+database involved, and reused identically by every write path (`NoteService`)
+without re-deriving the sharing rules per endpoint.
+
 ## Design choices I spent the most time on
 
 (The assignment asks for 2-3; this submission has 4, because idempotent
