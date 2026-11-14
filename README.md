@@ -270,6 +270,63 @@ message or stack trace. `detail` is always a hand-written, safe string.
   actual requirement for it - the two-level owner/collaborator model is doing
   its job at this scale, and more flexibility now would be speculative.
 
+## Functional roadmap
+
+The section above is about hardening what already exists (auth, resilience,
+observability). This one is different: new user-facing capability, prioritized
+by how directly each item closes a gap in what the service already promises -
+not a brainstorm dump. Each one either fills a hole the current design
+explicitly creates, or is a natural, low-cost extension of a mechanism that's
+already built, rather than a feature bolted on for its own sake.
+
+**Near-term - these close real gaps, not nice-to-haves:**
+
+1. **Team management API.** There is currently no `POST /teams` or membership
+   endpoint at all - teams and memberships only exist because `DevDataSeeder`
+   creates two of them on startup. The entire sharing model (pillar 1) depends
+   on teams existing, so this isn't really a "future" feature so much as a
+   missing piece of the core product; it's listed here rather than built now
+   purely because of the assessment's time box.
+2. **Note version history.** `Note.version` already increments on every edit
+   (pillar 2) - the next, cheap step is persisting each version as its own row
+   (`note_revision: note_id, version, title, body, edited_by, edited_at`)
+   instead of just overwriting in place. This closes two gaps at once: it's
+   the missing piece of "who changed this note" from the audit-and-non-
+   repudiation gap named above, and it gives users something real note-sharing
+   tools are expected to have the moment more than one person can edit a
+   note - the ability to see, or revert to, a previous version.
+3. **Full-text search.** "Capture and work with their notes" stops being true
+   past a few dozen notes without a way to find one again. Postgres's built-in
+   `tsvector`/GIN index covers this well before anything like Elasticsearch is
+   justified - worth noting this is actually a point *in favor* of the
+   relational-schema decision in pillar 3, not a cost of it.
+4. **Ownership transfer.** Pillar 1's invariant is "exactly one owner,
+   always" - but there's no API today for what happens when that person
+   leaves the team. `POST /notes/{id}/transfer-ownership` (owner-only, by the
+   same no-privilege-escalation rule already enforced for sharing) closes a
+   real edge case the current invariant creates but doesn't resolve.
+
+**Later - expands the product, lower urgency:**
+
+5. **Attachments (images/files).** Object storage (S3/GCS/MinIO) + pre-signed
+   upload URLs, not binary blobs in Postgres and not routing file bytes
+   through this service. Access control is free: attachments reuse
+   `NoteAccessService`'s existing `canRead`/`canWrite` checks rather than
+   needing a new permission model.
+6. **Comments on a note**, separate from editing its body - lets a team
+   discuss without touching content; note-read access would naturally gate
+   comment visibility, reusing the existing access check again.
+7. **Tags, not folders**, for organizing notes - many-to-many and cheaper to
+   model than a folder hierarchy, and a better fit for how teams actually tag
+   shared material along more than one axis at once.
+8. **Notifications** ("someone shared a note with you," "a note you're
+   watching changed") - a natural fit for the async/webhook pattern discussed
+   in the reference architecture, not a redesign of this service.
+
+**Deliberately left off**, to be explicit about what was pruned rather than
+just not thought of: markdown rendering, note export (PDF/Markdown). Both are
+cosmetic - they don't unlock a new capability the way the items above do.
+
 ## Assumptions
 
 The brief leaves scope open by design. Where it doesn't specify something,
