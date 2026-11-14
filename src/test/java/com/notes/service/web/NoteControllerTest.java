@@ -99,6 +99,15 @@ class NoteControllerTest {
     }
 
     @Test
+    void missingXUserIdHeader_returns401_notA500() throws Exception {
+        String body = """
+            {"title":"T","body":"B"}""";
+        mockMvc.perform(post("/api/v1/notes")
+                .contentType("application/json").content(body))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void create_withBlankTitle_returns400() throws Exception {
         String body = """
             {"title":"","body":"B"}""";

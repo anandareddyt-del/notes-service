@@ -196,6 +196,7 @@ message or stack trace. `detail` is always a hand-written, safe string.
 |---|---|---|
 | `200 OK` | Successful `GET`/`PUT` | - |
 | `201 Created` | Successful `POST` (note created, or note shared) | - |
+| `401 Unauthorized` | `X-User-Id` header missing - no identity presented at all | `curl` without `-H "X-User-Id: ..."` |
 | `400 Bad Request` | Request body fails validation (`@NotBlank`, `@NotNull`) | blank `title` on create |
 | `404 Not Found` | Note doesn't exist, **or** caller has zero access to it | both cases return the identical response - no existence leakage, see the sharing-model design choice above |
 | `403 Forbidden` | Caller has confirmed read access but not the permission needed for the action | a `READ`-only collaborator attempts `PUT`; a non-owner attempts `POST /shares` |

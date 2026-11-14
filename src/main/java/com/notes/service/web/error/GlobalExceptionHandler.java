@@ -62,6 +62,20 @@ public class GlobalExceptionHandler {
             "This Idempotency-Key was already used for a different request.");
     }
 
+    /**
+     * X-User-Id stands in for a real credential (see README) - its absence means "no
+     * identity was presented," which is 401 by definition, not a generic 500. Without
+     * this handler, MissingRequestHeaderException has no more-specific match than the
+     * Exception.class catch-all below and was incorrectly surfacing as 500 - caught by
+     * writing a test for it, not by inspection.
+     */
+    @ExceptionHandler(org.springframework.web.bind.MissingRequestHeaderException.class)
+    public ProblemDetail handleMissingIdentity(org.springframework.web.bind.MissingRequestHeaderException ex) {
+        log.warn("missing required header: {}", ex.getHeaderName());
+        return problem(HttpStatus.UNAUTHORIZED,
+            "Missing required X-User-Id header (stand-in for a real credential - see README).");
+    }
+
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleUnexpected(Exception ex) {
         log.error("unexpected error handling request", ex);
