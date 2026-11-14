@@ -30,7 +30,11 @@ curl -X POST localhost:8080/api/v1/notes \
   -H "X-User-Id: 1" -H "Content-Type: application/json" \
   -d '{"title":"First note","body":"hello"}'
 
-curl localhost:8080/api/v1/notes/1 -H "X-User-Id: 1"
+curl -X GET localhost:8080/api/v1/notes/1 -H "X-User-Id: 1"
+
+# list every note visible to this caller (owned, directly shared, or shared
+# via a team they're on), paginated
+curl -X GET "localhost:8080/api/v1/notes?page=0&size=20" -H "X-User-Id: 1"
 
 curl -X PUT localhost:8080/api/v1/notes/1 \
   -H "X-User-Id: 1" -H "Content-Type: application/json" \
