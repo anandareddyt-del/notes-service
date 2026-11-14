@@ -55,6 +55,13 @@ public class GlobalExceptionHandler {
         return problem(HttpStatus.BAD_REQUEST, "The request was invalid.");
     }
 
+    @ExceptionHandler(IdempotencyKeyReusedException.class)
+    public ProblemDetail handleIdempotencyKeyReused(IdempotencyKeyReusedException ex) {
+        log.warn("idempotency key reused for a different request: {}", ex.getMessage());
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY,
+            "This Idempotency-Key was already used for a different request.");
+    }
+
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleUnexpected(Exception ex) {
         log.error("unexpected error handling request", ex);

@@ -34,9 +34,10 @@ public class NoteController {
     @PostMapping
     public ResponseEntity<NoteResponse> create(
         @RequestHeader("X-User-Id") Long callerId,
+        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
         @Valid @RequestBody CreateNoteRequest request
     ) {
-        Note note = noteService.createNote(callerId, request.title(), request.body());
+        Note note = noteService.createNote(callerId, request.title(), request.body(), idempotencyKey);
         return ResponseEntity.created(URI.create("/api/v1/notes/" + note.getId()))
             .body(NoteResponse.from(note));
     }

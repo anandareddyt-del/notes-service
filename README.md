@@ -39,6 +39,12 @@ curl -X PUT localhost:8080/api/v1/notes/1 \
 curl -X POST localhost:8080/api/v1/notes/1/shares \
   -H "X-User-Id: 1" -H "Content-Type: application/json" \
   -d '{"principalType":"USER","principalId":2,"permission":"WRITE"}'
+
+# retrying a create with the same Idempotency-Key replays the original note
+# instead of creating a duplicate - safe to retry after a dropped response
+curl -X POST localhost:8080/api/v1/notes \
+  -H "X-User-Id: 1" -H "Idempotency-Key: my-retry-key-1" \
+  -H "Content-Type: application/json" -d '{"title":"Idempotent","body":"hello"}'
 ```
 
 **Postgres**, the intended production datastore, is included via
@@ -51,13 +57,19 @@ why, and run `docker compose up -d` + `spring.profiles.active=postgres` to use i
 ./mvnw test
 ```
 
-8 tests: 5 pure-unit tests of the access-control logic (Mockito, no DB) and
-2 integration tests against real H2 persistence proving the optimistic-lock
-and owner-only-resharing mechanisms actually work, not just in theory - writing
-the concurrency test caught a real bug in the first implementation (see commit
-history).
+17 tests: 5 pure-unit tests of the access-control logic (Mockito, no DB), 2
+integration tests against real H2 persistence proving the optimistic-lock and
+owner-only-resharing mechanisms actually work (writing the concurrency test
+caught a real bug in the first implementation - see commit history), and 9
+HTTP-layer tests proving the full status-code contract (201/400/404/403/409/
+422) holds at the REST boundary, including the idempotency-key replay and
+reuse-conflict behavior below.
 
 ## Design choices I spent the most time on
+
+(The assignment asks for 2-3; this submission has 4, because idempotent
+creation turned out to be a genuinely distinct decision from concurrency
+control, not a footnote on it - see pillar 4.)
 
 ### 1. Sharing / permission model
 
@@ -128,6 +140,39 @@ needs.
 eventual consistency. Correct at the stated scale; the limit of that choice is
 named explicitly below.
 
+### 4. Idempotent note creation
+
+`POST /notes` accepts an optional client-supplied `Idempotency-Key` header.
+When present, the key (scoped per caller, enforced by a DB unique constraint
+on `(idempotency_key, caller_id)`) plus a fingerprint of the request body are
+written in the same transaction as the note itself. A retry with the same key
+and the same body replays the original note - no second row is ever created;
+the same key with a different body is rejected (`422`) rather than silently
+served as if it were the original request.
+
+This is a different failure mode from pillar 2's concurrency control, worth
+calling out explicitly because they look similar but aren't: optimistic
+locking protects an **update** to a resource that already has an identity -
+there's a `noteId` and a `version` to compare. Idempotency protects a
+**create**, where no row exists yet - a client that times out waiting for a
+response has no way to tell "it failed" from "it succeeded but I didn't hear
+back," and a naive retry of `POST /notes` creates a second note with nothing
+to detect the duplication against. The version column can't help here; a
+separate mechanism is required, which is exactly what makes this its own
+design decision rather than an extension of pillar 2.
+
+**Invariants this guarantees:** a given (caller, key) pair can never produce
+more than one note - enforced at the database layer, not just application
+logic; the idempotency record and the note it refers to can never exist one
+without the other (same transaction); reusing a key for a materially
+different request is rejected explicitly, never silently reused.
+
+**Tradeoff accepted:** opt-in (the client must supply the header) and
+currently scoped to note creation only, not update/share - extending it to
+those endpoints is a natural next step, not a redesign. The request
+fingerprint is a plain string comparison, not a cryptographic hash - adequate
+for catching a client bug, not meant as a security boundary.
+
 ## On H2 vs Postgres
 
 Postgres was and is the intended production datastore - the schema, JPA
@@ -141,6 +186,23 @@ H2 by default so the service is guaranteed runnable right now, and say so
 here plainly. Swapping to Postgres is `spring.profiles.active=postgres` plus
 `docker compose up -d` away.
 
+## API error codes
+
+Every error response is an RFC 9457 "problem details" JSON body (`status`,
+`detail`, `traceId`) via `GlobalExceptionHandler` - never a raw exception
+message or stack trace. `detail` is always a hand-written, safe string.
+
+| Status | When | Example trigger |
+|---|---|---|
+| `200 OK` | Successful `GET`/`PUT` | - |
+| `201 Created` | Successful `POST` (note created, or note shared) | - |
+| `400 Bad Request` | Request body fails validation (`@NotBlank`, `@NotNull`) | blank `title` on create |
+| `404 Not Found` | Note doesn't exist, **or** caller has zero access to it | both cases return the identical response - no existence leakage, see the sharing-model design choice above |
+| `403 Forbidden` | Caller has confirmed read access but not the permission needed for the action | a `READ`-only collaborator attempts `PUT`; a non-owner attempts `POST /shares` |
+| `409 Conflict` | Optimistic-lock version mismatch on `PUT` | client's `version` is behind the note's true current version |
+| `422 Unprocessable Content` | Same `Idempotency-Key` reused with a materially different request body | retrying `POST /notes` with the same key but different `title`/`body` |
+| `500 Internal Server Error` | Anything unexpected | logged server-side with full stack trace, correlated by `traceId`/`X-Request-Id` - never shown to the caller |
+
 ## Trade-offs summary
 
 | Decision | Gain | Cost |
@@ -148,6 +210,7 @@ here plainly. Swapping to Postgres is `spring.profiles.active=postgres` plus
 | Owner + ACL (user or team) instead of general RBAC | Simple, unambiguous accountability | No admin tier, no org-wide default policies |
 | Optimistic locking instead of real-time merge | Cheap, prevents silent lost updates, directly testable | Conflicts require manual re-edit, not live co-editing |
 | Relational (Postgres-shaped) instead of NoSQL | Free referential integrity, atomic multi-row writes, natural fit for ACL joins | No horizontal write-scale story if team count explodes |
+| Idempotency key on create instead of relying on the client to dedupe | A dropped response can't cause a duplicate note; database-enforced, not a convention | Opt-in, create-only for now; same-key-different-body costs a 422 round trip |
 | Header-based stub principal instead of real auth | Lets the sharing/concurrency logic be exercised end to end within the time box | Not real authentication - see below |
 | Single service, no API gateway | Nothing extra for a reviewer to stand up | No centralized rate-limiting/routing - correct only while there's one service |
 
@@ -171,6 +234,14 @@ here plainly. Swapping to Postgres is `spring.profiles.active=postgres` plus
   unreachable) - explicitly never for optimistic-lock conflicts, which must
   never be retried automatically. Not yet implemented; named here rather than
   silently skipped.
+- **Audit & non-repudiation.** An append-only log of who changed what, as whom
+  (subject and actor, once real auth exists) - matters specifically because
+  notes are shared and edited by more than one person; right now there's no
+  answer to "who changed this note" beyond the `updatedAt` timestamp.
+- **Abuse protection / rate limiting.** Per-client rate limits and cost-based
+  limits on expensive operations (e.g. large list queries) - this would live
+  at the API-gateway layer once one exists (see below), not bolted onto this
+  service directly.
 - **Authorization/entitlement caching**, once the ACL join shows up in a slow
   query log - short TTL, invalidated on every write to `note_acl` or
   `team_membership`, so the "access is live" invariant holds even with caching

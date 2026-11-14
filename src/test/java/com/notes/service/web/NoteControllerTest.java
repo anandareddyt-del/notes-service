@@ -66,6 +66,39 @@ class NoteControllerTest {
     }
 
     @Test
+    void create_withSameIdempotencyKeyAndSameBody_replaysOriginal_doesNotCreateASecondNote() throws Exception {
+        String body = """
+            {"title":"T","body":"B"}""";
+        String key = "retry-key-1";
+
+        String firstResponse = mockMvc.perform(post("/api/v1/notes").header("X-User-Id", ownerId)
+                .header("Idempotency-Key", key).contentType("application/json").content(body))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        String secondResponse = mockMvc.perform(post("/api/v1/notes").header("X-User-Id", ownerId)
+                .header("Idempotency-Key", key).contentType("application/json").content(body))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        org.assertj.core.api.Assertions.assertThat(secondResponse).isEqualTo(firstResponse);
+    }
+
+    @Test
+    void create_withSameIdempotencyKeyButDifferentBody_returns422() throws Exception {
+        String key = "retry-key-2";
+        mockMvc.perform(post("/api/v1/notes").header("X-User-Id", ownerId).header("Idempotency-Key", key)
+                .contentType("application/json").content("""
+                    {"title":"T1","body":"B1"}"""))
+            .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/notes").header("X-User-Id", ownerId).header("Idempotency-Key", key)
+                .contentType("application/json").content("""
+                    {"title":"T2","body":"B2"}"""))
+            .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
     void create_withBlankTitle_returns400() throws Exception {
         String body = """
             {"title":"","body":"B"}""";
