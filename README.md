@@ -219,6 +219,34 @@ message or stack trace. `detail` is always a hand-written, safe string.
 | Header-based stub principal instead of real auth | Lets the sharing/concurrency logic be exercised end to end within the time box | Not real authentication - see below |
 | Single service, no API gateway | Nothing extra for a reviewer to stand up | No centralized rate-limiting/routing - correct only while there's one service |
 
+**On the idempotency row above - the client contract, spelled out**, since
+"opt-in" only works if the client does its part correctly:
+
+- **Generate the key once per logical create attempt, not once per HTTP
+  attempt.** A UUID is fine. The same key must be reused, unchanged, on every
+  retry of that *same* attempt - generating a fresh key on each retry defeats
+  the entire mechanism, since the server would see each retry as a brand-new,
+  unrelated request with nothing to compare it against.
+- **A `201` returned on a retry is the original note, not a new one.** The
+  client should trust the response body/`id` as confirmation the original
+  attempt succeeded, not assume a second note now exists because it got a
+  success response twice.
+- **Never reuse a key for a genuinely different request.** Reusing
+  `retry-key-1` for a *different* note (different title/body) is a client
+  bug, by definition - the server detects this via the stored request
+  fingerprint and rejects it (`422`) rather than silently serving the wrong
+  cached response, which would be a worse failure mode than an explicit error.
+- **The header is optional, which means the protection is too.** There's no
+  server-side way to force a client to send it - a client that omits it
+  simply opts back into "duplicate possible on retry," the exact state this
+  mechanism exists to let a client avoid.
+- **One honest gap worth naming**: idempotency records are never expired or
+  cleaned up today - a production version would need a retention window (the
+  common pattern: treat a key older than N days as a fresh request, same as
+  if it had never been used), so the table doesn't grow unbounded forever.
+  Not part of the client contract, but a real simplification in the current
+  implementation worth being upfront about.
+
 ## What I'd change, add, or stop doing with more time
 
 - **Real authentication.** The `X-User-Id` header is a stub. Production would
@@ -266,6 +294,11 @@ message or stack trace. `detail` is always a hand-written, safe string.
   pairing where an added dependency's compatibility hadn't been verified; the
   value of OpenAPI scales with API surface size and consumer count, neither of
   which this submission has yet.
+- **Idempotency record retention.** `idempotency_record` rows are never
+  expired or cleaned up today - a scheduled job (or a TTL index, if this ever
+  moved to a store that supports one) to drop records past a retention window
+  (e.g. 30 days) would keep the table bounded, with an old key past that
+  window correctly treated as a fresh request rather than a replay.
 - **Stop**: resist adding a role hierarchy or general RBAC until there's an
   actual requirement for it - the two-level owner/collaborator model is doing
   its job at this scale, and more flexibility now would be speculative.
