@@ -60,13 +60,17 @@ public class NoteService {
     /**
      * expectedVersion is the version the client last saw. We overwrite the freshly
      * fetched entity's version with it before save(): on flush, Hibernate compiles
-     * UPDATE ... SET version = version + 1 WHERE id = ? AND version = ?, using
-     * whatever value is currently on the entity - which is now the client's belief,
-     * not necessarily the true current value. If another writer already moved the
-     * real version past expectedVersion, that WHERE clause matches zero rows and
-     * Hibernate throws ObjectOptimisticLockingFailureException, mapped to 409 by
-     * GlobalExceptionHandler. This is the whole concurrency-control mechanism from
-     * the design doc, expressed in four lines.
+     * UPDATE ... SET version = version + 1 WHERE id = ? AND version = ? using whatever
+     * version was loaded into this persistence context - genuinely concurrent writers
+     * are caught by that, unmodified, with no manual intervention needed. The explicit
+     * check below handles the far more common case for a request/response API: the
+     * client's belief is already stale by the time their request arrives (they read
+     * v0, someone else already committed v1, and only now does the client try to save
+     * against v0). A fresh findById always returns the true current version, so
+     * comparing it to what the client sent catches that case immediately, before any
+     * write is attempted - rather than relying on manually forcing the entity's version
+     * field to the client's value, which does not reliably drive Hibernate's own
+     * WHERE-clause generation for an already-managed entity.
      */
     public Note updateNote(Long noteId, Long callerId, String title, String body, long expectedVersion) {
         Note note = noteRepository.findById(noteId)
@@ -79,10 +83,12 @@ public class NoteService {
             throw new InsufficientPermissionException(
                 "Caller " + callerId + " does not have write access to note " + noteId);
         }
+        if (!note.getVersion().equals(expectedVersion)) {
+            throw new org.springframework.orm.ObjectOptimisticLockingFailureException(Note.class, noteId);
+        }
 
         note.setTitle(title);
         note.setBody(body);
-        note.setVersion(expectedVersion);
         Note saved = noteRepository.save(note);
         log.info("note updated id={} callerId={} newVersion={}", noteId, callerId, saved.getVersion());
         return saved;
